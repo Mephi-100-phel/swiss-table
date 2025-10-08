@@ -22,19 +22,51 @@ struct swiss_table
   node_t** _groups;
   uint32_t _group_count;
   uint32_t _current_size;
+  uint32_t _deleted;
   uint64_t (*hash_f)(const char*);
 };
 
 static uint64_t
 hash(const char* key)
 {
-  
+  static const uint16_t noise[] = { 18894, 1149, 9843, 5236, 21354, 26871, 21465, 17861, 2414, 5219, 24185, 5711, 866, 16758, 26915, 27184 };
+  uint64_t sum = 0, hash = 0;
+  for (uint32_t i = 0; i < strlen(key); ++i) {
+    sum += (key[i] * noise[i % 16]);
+  }
+  for (uint8_t i = 0; i < 8; ++i) {
+    hash ^= ((sum << i) | (sum >> (64 - i)));
+  }
+  return hash;
 }
 
 static void
 expand(swiss_table_t* tbl_ptr)
 {
-  return;
+  tbl_ptr->_current_size -= tbl_ptr->_deleted;
+  tbl_ptr->_group_count *= 2;
+  tbl_ptr->_deleted = 0;
+  node_t** tmp_groups = tbl_ptr->_groups;
+  uint8_t** tmp_control = tbl_ptr->_control;
+  tbl_ptr->_groups = (node_t**)malloc(tbl_ptr->_group_count * sizeof(node_t*));
+  tbl_ptr->_control = (uint8_t**)malloc(tbl_ptr->_group_count * sizeof(uint8_t*)); 
+  for (uint32_t i = 0; i < tbl_ptr->_group_count; ++i) {
+    tbl_ptr->_control[i] = (uint8_t*)calloc(GROUP_SIZE, sizeof(uint8_t));
+    tbl_ptr->_groups[i] = (node_t*)calloc(GROUP_SIZE, sizeof(node_t));
+  }
+  for (uint32_t group_index = 0; group_index < tbl_ptr->_group_count / 2; ++group_index) {
+    for (uint8_t node_index = 0; node_index < GROUP_SIZE; ++node_index) {
+      if ((int8_t)tmp_control[group_index][node_index] > 0) {
+        swiss_table_insert_update(tbl_ptr, tmp_groups[group_index][node_index]._key, tmp_groups[group_index][node_index]._data);
+        free(tmp_groups[group_index][node_index]._key);
+        free(tmp_groups[group_index][node_index]._data);
+      }
+    }
+    free(tmp_groups[group_index]);
+    free(tmp_control[group_index]);
+  }
+  free(tmp_groups);
+  free(tmp_control);
 }
 
 swiss_table_t*
@@ -116,6 +148,7 @@ swiss_table_delete(swiss_table_t* tbl_ptr, const char* key)
             }
           }
           tbl_ptr->_control[group_index][metadata_index] = DELETED;
+          ++tbl_ptr->_deleted;
           return NO_ERR;
         }
       }
