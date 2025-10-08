@@ -22,7 +22,6 @@ struct swiss_table
   node_t** _groups;
   uint32_t _group_count;
   uint32_t _current_size;
-  uint32_t _deleted;
   uint64_t (*hash_f)(const char*);
 };
 
@@ -73,12 +72,12 @@ swiss_table_insert_update(swiss_table_t* tbl_ptr, const char* key, const char* d
   }
   uint64_t h = tbl_ptr->hash_f(key);
   uint8_t metadata = h & METADATA_MASK;
-  for (uint64_t group_index = (h & HASH_MASK) >> 7;;group_index = (group_index + 1) % tbl_ptr->_group_count) {
+  for (uint64_t group_index = ((h & HASH_MASK) >> 7) % tbl_ptr->_group_count;;group_index = (group_index + 1) % tbl_ptr->_group_count) {
     for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
       if (tbl_ptr->_control[group_index][metadata_index] == metadata) {
         if (!strcmp(tbl_ptr->_groups[group_index][metadata_index]._key, key)) {
           free(tbl_ptr->_groups[group_index][metadata_index]._data);
-          strcpy(tbl_ptr->_groups[group_index][metadata_index]._data, data);
+          tbl_ptr->_groups[group_index][metadata_index]._data = strdup(data);
           return NO_ERR;
         }
       }
@@ -86,10 +85,68 @@ swiss_table_insert_update(swiss_table_t* tbl_ptr, const char* key, const char* d
     for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
       if (tbl_ptr->_control[group_index][metadata_index] == EMPTY) {
         tbl_ptr->_control[group_index][metadata_index] = metadata;
-        strcpy(tbl_ptr->_groups[group_index][metadata_index]._key, key);
-        strcpy(tbl_ptr->_groups[group_index][metadata_index]._data, data);
+        tbl_ptr->_groups[group_index][metadata_index]._key = strdup( key);
+        tbl_ptr->_groups[group_index][metadata_index]._data = strdup( data);
         ++tbl_ptr->_current_size;
         return NO_ERR;
+      }
+    }
+  }
+}
+
+uint8_t
+swiss_table_delete(swiss_table_t* tbl_ptr, const char* key)
+{
+  if (!tbl_ptr || !key) {
+    return INVALID_ARGS;
+  }
+  uint64_t h = tbl_ptr->hash_f(key);
+  uint8_t metadata = h & METADATA_MASK;
+  for (uint64_t group_index = ((h & HASH_MASK) >> 7) % tbl_ptr->_group_count;;group_index = (group_index + 1) % tbl_ptr->_group_count) {
+    for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
+      if (tbl_ptr->_control[group_index][metadata_index] == metadata) {
+        if (!strcmp(tbl_ptr->_groups[group_index][metadata_index]._key, key)) {
+          free(tbl_ptr->_groups[group_index][metadata_index]._key);
+          free(tbl_ptr->_groups[group_index][metadata_index]._data);
+          for (uint8_t m = 0; m < GROUP_SIZE; ++m) {
+            if (tbl_ptr->_control[group_index][m] == EMPTY) {
+              tbl_ptr->_control[group_index][metadata_index] = EMPTY;
+              --tbl_ptr->_current_size;
+              return NO_ERR;
+            }
+          }
+          tbl_ptr->_control[group_index][metadata_index] = DELETED;
+          return NO_ERR;
+        }
+      }
+    }
+    for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
+      if (tbl_ptr->_control[group_index][metadata_index] == EMPTY) {
+        return KEY_NOT_FOUND;
+      }
+    }
+  }
+}
+
+char*
+swiss_table_get_copy(const swiss_table_t* tbl_ptr, const char* key)
+{
+  if (!tbl_ptr || !key) {
+    return NULL;
+  }
+  uint64_t h = tbl_ptr->hash_f(key);
+  uint8_t metadata = h & METADATA_MASK;
+  for (uint64_t group_index = ((h & HASH_MASK) >> 7) % tbl_ptr->_group_count;;group_index = (group_index + 1) % tbl_ptr->_group_count) {
+    for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
+      if (tbl_ptr->_control[group_index][metadata_index] == metadata) {
+        if (!strcmp(tbl_ptr->_groups[group_index][metadata_index]._key, key)) {
+          return strdup(tbl_ptr->_groups[group_index][metadata_index]._data);
+        }
+      }
+    }
+    for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
+      if (tbl_ptr->_control[group_index][metadata_index] == EMPTY) {
+        return NULL;
       }
     }
   }

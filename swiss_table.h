@@ -22,6 +22,6 @@ uint8_t swiss_table_insert_update(swiss_table_t* tbl_ptr, const char* key, const
 
 uint8_t swiss_table_delete(swiss_table_t* tbl_ptr, const char* key);
 
-char* swiss_table_get(swiss_table_t* tbl_ptr, const char* key);
+char* swiss_table_get_copy(const swiss_table_t* tbl_ptr, const char* key);
 
 void swiss_table_destroy(swiss_table_t* tbl_ptr);
