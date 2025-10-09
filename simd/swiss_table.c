@@ -1,4 +1,5 @@
-#include "swiss_table.h"
+#include "../swiss_table.h"
+#include <omp.h>
 
 #define GROUP_SIZE 16
 #define INITIAL_GROUP_COUNT 16
@@ -24,7 +25,17 @@ struct swiss_table
   uint32_t _current_size;
   uint32_t _deleted;
   uint64_t (*hash_f)(const char*);
+  omp_lock_t _lock;
 };
+
+static inline void
+find_metadata(int8_t* res, const uint8_t* data, const uint8_t meta)
+{
+  #pragma omp simd
+  for (uint8_t i = 0; i < GROUP_SIZE; ++i) {
+    res[i] = data[i] ^ meta;
+  }
+}
 
 static uint64_t
 hash(const char* key)
@@ -75,6 +86,7 @@ swiss_table_init(void)
   swiss_table_t* new_table = (swiss_table_t*)calloc(1, sizeof(swiss_table_t));
   new_table->_group_count = INITIAL_GROUP_COUNT;
   new_table->hash_f = &hash;
+  omp_init_lock(&new_table->_lock);
   new_table->_control = (uint8_t**)malloc(INITIAL_GROUP_COUNT * sizeof(uint8_t*));
   new_table->_groups = (node_t**)malloc(INITIAL_GROUP_COUNT * sizeof(node_t*));
   for (uint8_t i = 0; i < INITIAL_GROUP_COUNT; ++i) {
@@ -104,24 +116,48 @@ swiss_table_insert_update(swiss_table_t* tbl_ptr, const char* key, const char* d
   }
   uint64_t h = tbl_ptr->hash_f(key);
   uint8_t metadata = (h & METADATA_MASK) + 1;
+  uint8_t found_flag = 0;
   for (uint64_t group_index = ((h & HASH_MASK) >> 7) % tbl_ptr->_group_count;;group_index = (group_index + 1) % tbl_ptr->_group_count) {
-    for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
-      if (tbl_ptr->_control[group_index][metadata_index] == metadata) {
-        if (!strcmp(tbl_ptr->_groups[group_index][metadata_index]._key, key)) {
-          free(tbl_ptr->_groups[group_index][metadata_index]._data);
-          tbl_ptr->_groups[group_index][metadata_index]._data = strdup(data);
-          return UPDATED;
+    int8_t meta[GROUP_SIZE];
+    found_flag = 0;
+    omp_set_lock(&tbl_ptr->_lock);
+    #pragma omp parallel sections
+    {
+      #pragma omp section 
+      {
+        find_metadata(meta, tbl_ptr->_control[group_index], metadata);
+        for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
+          if (!meta[metadata_index]) {
+            if (!strcmp(tbl_ptr->_groups[group_index][metadata_index]._key, key)) {
+              found_flag = 0x0f;
+              omp_unset_lock(&tbl_ptr->_lock);
+              free(tbl_ptr->_groups[group_index][metadata_index]._data);
+              tbl_ptr->_groups[group_index][metadata_index]._data = strdup(data);
+              break;
+            }
+          }
+        }
+        omp_unset_lock(&tbl_ptr->_lock);
+      }
+      #pragma omp section
+      {
+        for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
+          if (tbl_ptr->_control[group_index][metadata_index] == EMPTY) {
+            omp_set_lock(&tbl_ptr->_lock);
+            omp_unset_lock(&tbl_ptr->_lock);
+            if (found_flag) { break; }
+            found_flag = 0xf0;
+            tbl_ptr->_control[group_index][metadata_index] = metadata;
+            tbl_ptr->_groups[group_index][metadata_index]._key = strdup( key);
+            tbl_ptr->_groups[group_index][metadata_index]._data = strdup( data);
+            ++tbl_ptr->_current_size;
+            break;
+          }
         }
       }
     }
-    for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
-      if (tbl_ptr->_control[group_index][metadata_index] == EMPTY) {
-        tbl_ptr->_control[group_index][metadata_index] = metadata;
-        tbl_ptr->_groups[group_index][metadata_index]._key = strdup( key);
-        tbl_ptr->_groups[group_index][metadata_index]._data = strdup( data);
-        ++tbl_ptr->_current_size;
-        return NO_ERR;
-      }
+    if (found_flag) {
+      return (found_flag > 0x0f) ? NO_ERR : UPDATED;
     }
   }
 }
@@ -135,8 +171,10 @@ swiss_table_delete(swiss_table_t* tbl_ptr, const char* key)
   uint64_t h = tbl_ptr->hash_f(key);
   uint8_t metadata = (h & METADATA_MASK) + 1;
   for (uint64_t group_index = ((h & HASH_MASK) >> 7) % tbl_ptr->_group_count;;group_index = (group_index + 1) % tbl_ptr->_group_count) {
+    int8_t meta[GROUP_SIZE];
+    find_metadata(meta, tbl_ptr->_control[group_index], metadata);
     for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
-      if (tbl_ptr->_control[group_index][metadata_index] == metadata) {
+      if (!meta[metadata_index]) {
         if (!strcmp(tbl_ptr->_groups[group_index][metadata_index]._key, key)) {
           free(tbl_ptr->_groups[group_index][metadata_index]._key);
           free(tbl_ptr->_groups[group_index][metadata_index]._data);
@@ -170,8 +208,10 @@ swiss_table_get_copy(const swiss_table_t* tbl_ptr, const char* key)
   uint64_t h = tbl_ptr->hash_f(key);
   uint8_t metadata = (h & METADATA_MASK) + 1;
   for (uint64_t group_index = ((h & HASH_MASK) >> 7) % tbl_ptr->_group_count;;group_index = (group_index + 1) % tbl_ptr->_group_count) {
+    int8_t meta[GROUP_SIZE];
+    find_metadata(meta, tbl_ptr->_control[group_index], metadata);
     for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
-      if (tbl_ptr->_control[group_index][metadata_index] == metadata) {
+      if (!meta[metadata_index]) {
         if (!strcmp(tbl_ptr->_groups[group_index][metadata_index]._key, key)) {
           return strdup(tbl_ptr->_groups[group_index][metadata_index]._data);
         }
@@ -201,6 +241,7 @@ swiss_table_destroy(swiss_table_t* tbl_ptr)
     free(tbl_ptr->_control[i]);
     free(tbl_ptr->_groups[i]);
   }
+  omp_destroy_lock(&tbl_ptr->_lock);
   free(tbl_ptr->_control);
   free(tbl_ptr->_groups);
   free(tbl_ptr);
