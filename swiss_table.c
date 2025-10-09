@@ -7,7 +7,7 @@
 #define DELETED 0x80
 #define EMPTY 0x0
 
-#define METADATA_MASK 0x7f
+#define METADATA_MASK 0x7e
 #define HASH_MASK 0xffffffffffffff80
 
 struct swiss_table_node
@@ -103,7 +103,7 @@ swiss_table_insert_update(swiss_table_t* tbl_ptr, const char* key, const char* d
     expand(tbl_ptr);
   }
   uint64_t h = tbl_ptr->hash_f(key);
-  uint8_t metadata = h & METADATA_MASK;
+  uint8_t metadata = (h & METADATA_MASK) + 1;
   for (uint64_t group_index = ((h & HASH_MASK) >> 7) % tbl_ptr->_group_count;;group_index = (group_index + 1) % tbl_ptr->_group_count) {
     for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
       if (tbl_ptr->_control[group_index][metadata_index] == metadata) {
@@ -133,7 +133,7 @@ swiss_table_delete(swiss_table_t* tbl_ptr, const char* key)
     return INVALID_ARGS;
   }
   uint64_t h = tbl_ptr->hash_f(key);
-  uint8_t metadata = h & METADATA_MASK;
+  uint8_t metadata = (h & METADATA_MASK) + 1;
   for (uint64_t group_index = ((h & HASH_MASK) >> 7) % tbl_ptr->_group_count;;group_index = (group_index + 1) % tbl_ptr->_group_count) {
     for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
       if (tbl_ptr->_control[group_index][metadata_index] == metadata) {
@@ -168,7 +168,7 @@ swiss_table_get_copy(const swiss_table_t* tbl_ptr, const char* key)
     return NULL;
   }
   uint64_t h = tbl_ptr->hash_f(key);
-  uint8_t metadata = h & METADATA_MASK;
+  uint8_t metadata = (h & METADATA_MASK) + 1;
   for (uint64_t group_index = ((h & HASH_MASK) >> 7) % tbl_ptr->_group_count;;group_index = (group_index + 1) % tbl_ptr->_group_count) {
     for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
       if (tbl_ptr->_control[group_index][metadata_index] == metadata) {
@@ -192,6 +192,12 @@ swiss_table_destroy(swiss_table_t* tbl_ptr)
     return;
   }
   for (uint8_t i = 0; i < tbl_ptr->_group_count; ++i) {
+    for (uint8_t m = 0; m < GROUP_SIZE; ++m) {
+      if ((int8_t)(tbl_ptr->_control[i][m]) > 0) {
+        free(tbl_ptr->_groups[i][m]._key);
+        free(tbl_ptr->_groups[i][m]._data);
+      }
+    }
     free(tbl_ptr->_control[i]);
     free(tbl_ptr->_groups[i]);
   }
