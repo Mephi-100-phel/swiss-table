@@ -10,6 +10,7 @@ typedef struct swiss_table swiss_table_t;
 enum errors
 {
   NO_ERR = 0,
+  UPDATED,
   KEY_NOT_FOUND,
   INVALID_ARGS
 };

@@ -43,8 +43,8 @@ hash(const char* key)
 static void
 expand(swiss_table_t* tbl_ptr)
 {
-  tbl_ptr->_current_size -= tbl_ptr->_deleted;
   tbl_ptr->_group_count *= 2;
+  tbl_ptr->_current_size = 0;
   tbl_ptr->_deleted = 0;
   node_t** tmp_groups = tbl_ptr->_groups;
   uint8_t** tmp_control = tbl_ptr->_control;
@@ -110,7 +110,7 @@ swiss_table_insert_update(swiss_table_t* tbl_ptr, const char* key, const char* d
         if (!strcmp(tbl_ptr->_groups[group_index][metadata_index]._key, key)) {
           free(tbl_ptr->_groups[group_index][metadata_index]._data);
           tbl_ptr->_groups[group_index][metadata_index]._data = strdup(data);
-          return NO_ERR;
+          return UPDATED;
         }
       }
     }
