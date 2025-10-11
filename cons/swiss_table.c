@@ -4,8 +4,8 @@
 #define INITIAL_GROUP_COUNT 16
 #define MAX_FILL 0.7f
 
-#define DELETED 0x80
-#define EMPTY 0x0
+#define DELETED 0xfe
+#define EMPTY 0x80
 
 #define METADATA_MASK 0x7e
 #define HASH_MASK 0xffffffffffffff80
@@ -51,12 +51,13 @@ expand(swiss_table_t* tbl_ptr)
   tbl_ptr->_groups = (node_t**)malloc(tbl_ptr->_group_count * sizeof(node_t*));
   tbl_ptr->_control = (uint8_t**)malloc(tbl_ptr->_group_count * sizeof(uint8_t*)); 
   for (uint32_t i = 0; i < tbl_ptr->_group_count; ++i) {
-    tbl_ptr->_control[i] = (uint8_t*)calloc(GROUP_SIZE, sizeof(uint8_t));
+    tbl_ptr->_control[i] = (uint8_t*)malloc(GROUP_SIZE * sizeof(uint8_t));
+    memset(tbl_ptr->_control[i], EMPTY, GROUP_SIZE);
     tbl_ptr->_groups[i] = (node_t*)calloc(GROUP_SIZE, sizeof(node_t));
   }
   for (uint32_t group_index = 0; group_index < tbl_ptr->_group_count / 2; ++group_index) {
     for (uint8_t node_index = 0; node_index < GROUP_SIZE; ++node_index) {
-      if ((int8_t)tmp_control[group_index][node_index] > 0) {
+      if ((int8_t)tmp_control[group_index][node_index] >= 0) {
         swiss_table_insert_update(tbl_ptr, tmp_groups[group_index][node_index]._key, tmp_groups[group_index][node_index]._data);
         free(tmp_groups[group_index][node_index]._key);
         free(tmp_groups[group_index][node_index]._data);
@@ -78,7 +79,8 @@ swiss_table_init(void)
   new_table->_control = (uint8_t**)malloc(INITIAL_GROUP_COUNT * sizeof(uint8_t*));
   new_table->_groups = (node_t**)malloc(INITIAL_GROUP_COUNT * sizeof(node_t*));
   for (uint8_t i = 0; i < INITIAL_GROUP_COUNT; ++i) {
-    new_table->_control[i] = (uint8_t*)calloc(GROUP_SIZE, sizeof(uint8_t));
+    new_table->_control[i] = (uint8_t*)malloc(GROUP_SIZE * sizeof(uint8_t));
+    memset(new_table->_control[i], EMPTY, GROUP_SIZE);
     new_table->_groups[i] = (node_t*)calloc(GROUP_SIZE, sizeof(node_t));
   }
   return new_table;
@@ -103,7 +105,7 @@ swiss_table_insert_update(swiss_table_t* tbl_ptr, const char* key, const char* d
     expand(tbl_ptr);
   }
   uint64_t h = tbl_ptr->hash_f(key);
-  uint8_t metadata = (h & METADATA_MASK) + 1;
+  uint8_t metadata = h & METADATA_MASK;
   for (uint64_t group_index = ((h & HASH_MASK) >> 7) % tbl_ptr->_group_count;;group_index = (group_index + 1) % tbl_ptr->_group_count) {
     for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
       if (tbl_ptr->_control[group_index][metadata_index] == metadata) {
@@ -133,7 +135,7 @@ swiss_table_delete(swiss_table_t* tbl_ptr, const char* key)
     return INVALID_ARGS;
   }
   uint64_t h = tbl_ptr->hash_f(key);
-  uint8_t metadata = (h & METADATA_MASK) + 1;
+  uint8_t metadata = h & METADATA_MASK;
   for (uint64_t group_index = ((h & HASH_MASK) >> 7) % tbl_ptr->_group_count;;group_index = (group_index + 1) % tbl_ptr->_group_count) {
     for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
       if (tbl_ptr->_control[group_index][metadata_index] == metadata) {
@@ -168,7 +170,7 @@ swiss_table_get_copy(const swiss_table_t* tbl_ptr, const char* key)
     return NULL;
   }
   uint64_t h = tbl_ptr->hash_f(key);
-  uint8_t metadata = (h & METADATA_MASK) + 1;
+  uint8_t metadata = h & METADATA_MASK;
   for (uint64_t group_index = ((h & HASH_MASK) >> 7) % tbl_ptr->_group_count;;group_index = (group_index + 1) % tbl_ptr->_group_count) {
     for (uint8_t metadata_index = 0; metadata_index < GROUP_SIZE; ++metadata_index) {
       if (tbl_ptr->_control[group_index][metadata_index] == metadata) {
@@ -193,7 +195,7 @@ swiss_table_destroy(swiss_table_t* tbl_ptr)
   }
   for (uint8_t i = 0; i < tbl_ptr->_group_count; ++i) {
     for (uint8_t m = 0; m < GROUP_SIZE; ++m) {
-      if ((int8_t)(tbl_ptr->_control[i][m]) > 0) {
+      if ((int8_t)(tbl_ptr->_control[i][m]) >= 0) {
         free(tbl_ptr->_groups[i][m]._key);
         free(tbl_ptr->_groups[i][m]._data);
       }
