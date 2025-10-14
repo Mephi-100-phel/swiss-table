@@ -193,7 +193,7 @@ swiss_table_destroy(swiss_table_t* tbl_ptr)
   if (!tbl_ptr) {
     return;
   }
-  for (uint8_t i = 0; i < tbl_ptr->_group_count; ++i) {
+  for (uint32_t i = 0; i < tbl_ptr->_group_count; ++i) {
     for (uint8_t m = 0; m < GROUP_SIZE; ++m) {
       if ((int8_t)(tbl_ptr->_control[i][m]) >= 0) {
         free(tbl_ptr->_groups[i][m]._key);
